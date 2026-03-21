@@ -72,13 +72,15 @@ export class TurnAccumulator {
       sections.push(`## Codex Response\n${this.agentMessage.trim()}`);
     }
 
-    // Command executions
+    // Command executions — prefer streamed delta output over completed item output
     for (const item of this.completedItems) {
       if (item.type === "commandExecution") {
+        const output =
+          this.commandOutputs.get(item.id) || item.output;
         sections.push(
           `## Command: ${item.command}\n` +
             `Exit code: ${item.exitCode}\n` +
-            `\`\`\`\n${item.output}\n\`\`\``,
+            `\`\`\`\n${output}\n\`\`\``,
         );
       } else if (item.type === "fileChange") {
         sections.push(

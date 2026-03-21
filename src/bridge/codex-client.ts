@@ -44,6 +44,7 @@ export class CodexClient {
   >();
   private notificationHandlers = new Map<string, NotificationHandler[]>();
   private serverRequestHandler: ServerRequestHandler | null = null;
+  private processExitHandlers: Array<() => void> = [];
   private initialized = false;
 
   constructor(
@@ -71,13 +72,26 @@ export class CodexClient {
       logger.error("Codex stdout error:", err.message);
     });
 
+    this.process.stdin.on("error", (err) => {
+      logger.error("Codex stdin error:", err.message);
+    });
+
     this.process.on("exit", () => {
+      this.initialized = false;
       // Reject all pending requests and clear their timers
       for (const [, pending] of this.pendingRequests) {
         clearTimeout(pending.timer);
         pending.reject(new CodexConnectionError("Codex process exited"));
       }
       this.pendingRequests.clear();
+      // Notify exit handlers
+      for (const handler of this.processExitHandlers) {
+        try {
+          handler();
+        } catch {
+          // Best effort
+        }
+      }
     });
 
     const result = (await this.sendRequest("initialize", {
@@ -134,9 +148,18 @@ export class CodexClient {
     this.serverRequestHandler = handler;
   }
 
+  onProcessExit(handler: () => void): void {
+    this.processExitHandlers.push(handler);
+  }
+
   async close(): Promise<void> {
-    this.processManager.stop();
+    // Reject all pending requests before stopping
+    for (const [, pending] of this.pendingRequests) {
+      clearTimeout(pending.timer);
+      pending.reject(new CodexConnectionError("Client closing"));
+    }
     this.pendingRequests.clear();
+    this.processManager.stop();
     this.initialized = false;
   }
 
@@ -178,13 +201,21 @@ export class CodexClient {
         timer,
       });
 
-      this.process?.stdin?.write(data);
+      if (!this.process?.stdin?.writable) {
+        this.pendingRequests.delete(request.id);
+        clearTimeout(timer);
+        reject(new CodexConnectionError("Codex stdin not writable"));
+        return;
+      }
+      this.process.stdin.write(data);
     });
   }
 
   private sendNotification(method: string, params?: unknown): void {
     const notification = { jsonrpc: "2.0" as const, method, params };
-    this.process?.stdin?.write(serialize(notification));
+    if (this.process?.stdin?.writable) {
+      this.process.stdin.write(serialize(notification));
+    }
   }
 
   private handleData(data: string): void {

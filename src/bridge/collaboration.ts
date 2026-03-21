@@ -158,15 +158,31 @@ export class CollaborationManager {
     // Register temporary handlers for this turn
     const cleanup = this.registerTurnHandlers(turn.id, accumulator);
 
+    let timeoutTimer: ReturnType<typeof setTimeout> | undefined;
     try {
       const result = await Promise.race([
         accumulator.promise,
-        new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error("Codex response timeout")), 120_000),
-        ),
+        new Promise<never>((_, reject) => {
+          timeoutTimer = setTimeout(
+            () => reject(new Error("Codex response timeout")),
+            120_000,
+          );
+        }),
       ]);
       return result;
+    } catch (err) {
+      // Try to interrupt the timed-out turn
+      try {
+        await this.codexClient.interruptTurn({
+          threadId: session.codexThreadId!,
+          turnId: turn.id,
+        });
+      } catch {
+        // Best effort
+      }
+      throw err;
     } finally {
+      clearTimeout(timeoutTimer);
       cleanup();
     }
   }
@@ -198,6 +214,7 @@ export class CollaborationManager {
       },
     ];
 
+    let samplingTimer: ReturnType<typeof setTimeout> | undefined;
     try {
       const result = (await Promise.race([
         this.mcpServer.createMessage({
@@ -205,19 +222,21 @@ export class CollaborationManager {
           systemPrompt,
           maxTokens: 4096,
         }),
-        new Promise<never>((_, reject) =>
-          setTimeout(
+        new Promise<never>((_, reject) => {
+          samplingTimer = setTimeout(
             () => reject(new Error("Claude sampling timed out after 120s")),
             120_000,
-          ),
-        ),
+          );
+        }),
       ])) as CreateMessageResult;
+      clearTimeout(samplingTimer);
 
       if (result.content.type === "text") {
         return result.content.text;
       }
       return JSON.stringify(result.content);
     } catch (err) {
+      clearTimeout(samplingTimer);
       logger.error("Claude sampling failed:", err);
       throw new Error(
         `Failed to get Claude response: ${err instanceof Error ? err.message : String(err)}`,

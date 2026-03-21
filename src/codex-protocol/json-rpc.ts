@@ -78,7 +78,10 @@ export function parseBuffer(buffer: string): {
     try {
       messages.push(JSON.parse(trimmed) as JsonRpcMessage);
     } catch {
-      // Skip malformed lines
+      // Log malformed lines instead of silently discarding
+      console.error(
+        `[AgentBridge] Malformed JSON-RPC: ${trimmed.substring(0, 200)}`,
+      );
     }
   }
 
