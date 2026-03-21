@@ -1,3 +1,4 @@
+import { writeFileSync } from "node:fs";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { CodexClient } from "./codex-client.js";
 import { CollaborationManager } from "./collaboration.js";
@@ -116,6 +117,13 @@ export class AgentBridge {
       });
       session.codexThreadId = thread.id;
       session.status = "active";
+      // Write thread ID to file so TUI can auto-resume
+      try {
+        writeFileSync("/tmp/agent-bridge-thread-id", thread.id);
+        logger.info(`Thread ID written to /tmp/agent-bridge-thread-id: ${thread.id}`);
+      } catch {
+        // Best effort
+      }
     })();
 
     this.threadPromises.set(session.id, promise);

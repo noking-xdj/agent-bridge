@@ -156,7 +156,9 @@ export class CodexClient {
       });
 
       ws.on("message", (data: Buffer | string) => {
-        this.handleData(data.toString());
+        // WebSocket messages are already framed (no newline delimiter),
+        // so append \n to make parseBuffer process them correctly
+        this.handleData(data.toString() + "\n");
       });
 
       ws.on("close", () => {
