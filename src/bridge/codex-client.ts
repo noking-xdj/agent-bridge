@@ -1,4 +1,5 @@
 import type { ChildProcess } from "node:child_process";
+import { WebSocket } from "ws";
 import { ProcessManager } from "../codex-protocol/process-manager.js";
 import {
   createRequest,
@@ -33,6 +34,7 @@ type ServerRequestHandler = (
 export class CodexClient {
   private processManager: ProcessManager;
   private process: ChildProcess | null = null;
+  private ws: WebSocket | null = null;
   private buffer = "";
   private pendingRequests = new Map<
     string | number,
@@ -58,6 +60,33 @@ export class CodexClient {
   }
 
   async initialize(): Promise<InitializeResult> {
+    if (this.config.transport === "ws" && this.config.wsUrl) {
+      // WS mode: spawn app-server listening on WS port, then connect as client
+      await this.initializeWebSocket();
+    } else {
+      // Stdio mode: spawn app-server with stdio transport, communicate via pipes
+      this.initializeStdio();
+    }
+
+    const result = (await this.sendRequest(
+      "initialize",
+      {
+        clientInfo: {
+          name: "AgentBridge",
+          version: "0.1.0",
+        },
+        protocolVersion: "2025-01-01",
+      },
+      60_000,
+    )) as InitializeResult;
+
+    this.sendNotification("initialized");
+    this.initialized = true;
+    logger.info("Codex initialized:", result.userAgent);
+    return result;
+  }
+
+  private initializeStdio(): void {
     this.process = this.processManager.start();
 
     if (!this.process.stdout || !this.process.stdin) {
@@ -77,44 +106,97 @@ export class CodexClient {
     });
 
     this.process.on("exit", () => {
-      this.initialized = false;
-      // Reject all pending requests and clear their timers
-      for (const [, pending] of this.pendingRequests) {
-        clearTimeout(pending.timer);
-        pending.reject(new CodexConnectionError("Codex process exited"));
-      }
-      this.pendingRequests.clear();
-      // Notify exit handlers
-      for (const handler of this.processExitHandlers) {
-        try {
-          handler();
-        } catch {
-          // Best effort
-        }
-      }
+      this.handleDisconnect();
+    });
+  }
+
+  private async initializeWebSocket(): Promise<void> {
+    const url = this.config.wsUrl!;
+
+    // Step 1: Spawn codex app-server with --listen ws://...
+    this.process = this.processManager.start();
+    this.process.on("exit", () => {
+      this.handleDisconnect();
     });
 
-    const result = (await this.sendRequest("initialize", {
-      clientInfo: {
-        name: "AgentBridge",
-        version: "0.1.0",
-      },
-      protocolVersion: "2025-01-01",
-    }, 60_000)) as InitializeResult;
+    // Step 2: Wait for the WS server to be ready, then connect
+    logger.info(`Waiting for Codex app-server on ${url}...`);
+    await this.connectWebSocketWithRetry(url, 10, 1000);
+  }
 
-    // Send initialized notification
-    this.sendNotification("initialized");
+  private async connectWebSocketWithRetry(
+    url: string,
+    maxRetries: number,
+    delayMs: number,
+  ): Promise<void> {
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        await this.connectWebSocket(url);
+        return;
+      } catch (err) {
+        if (attempt === maxRetries) {
+          throw new CodexConnectionError(
+            `Failed to connect to Codex WebSocket after ${maxRetries} attempts`,
+          );
+        }
+        logger.debug(`WebSocket connect attempt ${attempt} failed, retrying...`);
+        await new Promise((r) => setTimeout(r, delayMs));
+      }
+    }
+  }
 
-    this.initialized = true;
-    logger.info("Codex initialized:", result.userAgent);
-    return result;
+  private connectWebSocket(url: string): Promise<void> {
+    return new Promise<void>((resolve, reject) => {
+      const ws = new WebSocket(url);
+
+      ws.on("open", () => {
+        logger.info("WebSocket connected to Codex app-server");
+        this.ws = ws;
+        resolve();
+      });
+
+      ws.on("message", (data: Buffer | string) => {
+        this.handleData(data.toString());
+      });
+
+      ws.on("close", () => {
+        logger.warn("WebSocket connection closed");
+        this.handleDisconnect();
+      });
+
+      ws.on("error", (err) => {
+        if (!this.ws) {
+          reject(err);
+        } else {
+          logger.error("WebSocket error:", err.message);
+        }
+      });
+    });
+  }
+
+  private handleDisconnect(): void {
+    this.initialized = false;
+    for (const [, pending] of this.pendingRequests) {
+      clearTimeout(pending.timer);
+      pending.reject(new CodexConnectionError("Codex disconnected"));
+    }
+    this.pendingRequests.clear();
+    for (const handler of this.processExitHandlers) {
+      try {
+        handler();
+      } catch {
+        // Best effort
+      }
+    }
   }
 
   async startThread(params: ThreadStartParams): Promise<Thread> {
     this.ensureInitialized();
-    const result = (await this.sendRequest("thread/start", params, 60_000)) as {
-      thread: Thread;
-    };
+    const result = (await this.sendRequest(
+      "thread/start",
+      params,
+      60_000,
+    )) as { thread: Thread };
     return result.thread;
   }
 
@@ -153,12 +235,15 @@ export class CodexClient {
   }
 
   async close(): Promise<void> {
-    // Reject all pending requests before stopping
     for (const [, pending] of this.pendingRequests) {
       clearTimeout(pending.timer);
       pending.reject(new CodexConnectionError("Client closing"));
     }
     this.pendingRequests.clear();
+    if (this.ws) {
+      this.ws.close();
+      this.ws = null;
+    }
     this.processManager.stop();
     this.initialized = false;
   }
@@ -167,6 +252,24 @@ export class CodexClient {
     if (!this.initialized) {
       throw new CodexConnectionError("Codex client not initialized");
     }
+  }
+
+  /**
+   * Write data to the transport (stdio or WebSocket).
+   */
+  private writeToTransport(data: string): boolean {
+    if (this.ws) {
+      if (this.ws.readyState === WebSocket.OPEN) {
+        this.ws.send(data);
+        return true;
+      }
+      return false;
+    }
+    if (this.process?.stdin?.writable) {
+      this.process.stdin.write(data);
+      return true;
+    }
+    return false;
   }
 
   private async sendRequest(
@@ -201,21 +304,18 @@ export class CodexClient {
         timer,
       });
 
-      if (!this.process?.stdin?.writable) {
+      if (!this.writeToTransport(data)) {
         this.pendingRequests.delete(request.id);
         clearTimeout(timer);
-        reject(new CodexConnectionError("Codex stdin not writable"));
+        reject(new CodexConnectionError("Codex transport not writable"));
         return;
       }
-      this.process.stdin.write(data);
     });
   }
 
   private sendNotification(method: string, params?: unknown): void {
     const notification = { jsonrpc: "2.0" as const, method, params };
-    if (this.process?.stdin?.writable) {
-      this.process.stdin.write(serialize(notification));
-    }
+    this.writeToTransport(serialize(notification));
   }
 
   private handleData(data: string): void {
@@ -232,7 +332,6 @@ export class CodexClient {
     if (isResponse(msg)) {
       this.handleResponse(msg);
     } else if (isRequest(msg)) {
-      // Server request (e.g., approval request from Codex)
       logger.debug("← Codex server request:", msg.method);
       this.handleServerRequest(msg.id, msg.method, msg.params);
     } else if (isNotification(msg)) {
@@ -243,7 +342,10 @@ export class CodexClient {
           try {
             handler(msg.params);
           } catch (err) {
-            logger.error(`Notification handler error for ${msg.method}:`, err);
+            logger.error(
+              `Notification handler error for ${msg.method}:`,
+              err,
+            );
           }
         }
       }
@@ -280,11 +382,10 @@ export class CodexClient {
         result = { decision: "decline" };
       }
     } else {
-      // Default: auto-accept
       result = { decision: "accept" } satisfies ApprovalResponse;
     }
 
     const response = createResponse(id, result);
-    this.process?.stdin?.write(serialize(response));
+    this.writeToTransport(serialize(response));
   }
 }

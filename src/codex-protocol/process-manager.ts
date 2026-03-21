@@ -25,10 +25,11 @@ export class ProcessManager {
 
     const args = ["app-server"];
 
-    if (this.options.transport === "stdio") {
-      args.push("--listen", "stdio://");
-    } else if (this.options.transport === "ws" && this.options.wsUrl) {
+    if (this.options.transport === "ws" && this.options.wsUrl) {
+      // WebSocket mode: app-server listens on a WS port, clients connect to it
       args.push("--listen", this.options.wsUrl);
+    } else {
+      args.push("--listen", "stdio://");
     }
 
     logger.info(
