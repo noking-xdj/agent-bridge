@@ -19,16 +19,7 @@ export async function handleCodexAsk(
       bridge.getOrCreateSession()
     : bridge.getOrCreateSession();
 
-  if (!session.codexThreadId) {
-    const thread = await bridge.codexClient.startThread({
-      cwd: process.cwd(),
-      approvalPolicy: "full-auto",
-      sandbox: bridge.config.codex.sandbox ?? "none",
-      model: bridge.config.codex.model,
-    });
-    session.codexThreadId = thread.id;
-    session.status = "active";
-  }
+  await bridge.ensureThread(session);
 
   const task = session.createTask(`Ask: ${args.question}`);
   return bridge.executeTurn(session, task, args.question, undefined, true);

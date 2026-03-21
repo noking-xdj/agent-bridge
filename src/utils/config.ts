@@ -5,7 +5,7 @@ export interface AgentBridgeConfig {
     wsUrl?: string;
     model?: string;
     approvalPolicy: "auto" | "auto-session" | "decline";
-    sandbox?: "none" | "light";
+    sandbox?: "read-only" | "workspace-write" | "danger-full-access";
   };
   bridge: {
     delegateTimeoutMs: number;
@@ -20,7 +20,7 @@ export const defaultConfig: AgentBridgeConfig = {
     binaryPath: "codex",
     transport: "stdio",
     approvalPolicy: "auto",
-    sandbox: "none",
+    sandbox: "danger-full-access",
   },
   bridge: {
     delegateTimeoutMs: 300_000,

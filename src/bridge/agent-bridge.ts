@@ -69,6 +69,26 @@ export class AgentBridge {
     this.codexInitialized = true;
   }
 
+  /**
+   * Ensure Codex is initialized and the session has an active thread.
+   */
+  async ensureThread(
+    session: BridgeSession,
+    options?: { cwd?: string; model?: string },
+  ): Promise<void> {
+    await this.initializeCodex();
+    if (!session.codexThreadId) {
+      const thread = await this.codexClient.startThread({
+        cwd: options?.cwd ?? process.cwd(),
+        approvalPolicy: "never",
+        sandbox: this.config.codex.sandbox ?? "danger-full-access",
+        model: options?.model ?? this.config.codex.model,
+      });
+      session.codexThreadId = thread.id;
+      session.status = "active";
+    }
+  }
+
   async executeTurn(
     session: BridgeSession,
     task: TaskRecord,

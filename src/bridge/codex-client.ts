@@ -81,27 +81,35 @@ export class CodexClient {
     });
 
     const result = (await this.sendRequest("initialize", {
-      clientName: "AgentBridge",
-      clientVersion: "0.1.0",
+      clientInfo: {
+        name: "AgentBridge",
+        version: "0.1.0",
+      },
       protocolVersion: "2025-01-01",
-    })) as InitializeResult;
+    }, 60_000)) as InitializeResult;
 
     // Send initialized notification
     this.sendNotification("initialized");
 
     this.initialized = true;
-    logger.info("Codex initialized:", result.serverName, result.serverVersion);
+    logger.info("Codex initialized:", result.userAgent);
     return result;
   }
 
   async startThread(params: ThreadStartParams): Promise<Thread> {
     this.ensureInitialized();
-    return (await this.sendRequest("thread/start", params)) as Thread;
+    const result = (await this.sendRequest("thread/start", params, 60_000)) as {
+      thread: Thread;
+    };
+    return result.thread;
   }
 
   async startTurn(params: TurnStartParams): Promise<Turn> {
     this.ensureInitialized();
-    return (await this.sendRequest("turn/start", params)) as Turn;
+    const result = (await this.sendRequest("turn/start", params)) as {
+      turn: Turn;
+    };
+    return result.turn;
   }
 
   async interruptTurn(params: TurnInterruptParams): Promise<void> {

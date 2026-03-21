@@ -28,17 +28,7 @@ export async function handleCodexDelegate(
 ): Promise<string> {
   const session = bridge.getOrCreateSession();
 
-  // Ensure Codex thread exists
-  if (!session.codexThreadId) {
-    const thread = await bridge.codexClient.startThread({
-      cwd: args.cwd ?? process.cwd(),
-      approvalPolicy: "full-auto",
-      sandbox: bridge.config.codex.sandbox ?? "none",
-      model: args.model ?? bridge.config.codex.model,
-    });
-    session.codexThreadId = thread.id;
-    session.status = "active";
-  }
+  await bridge.ensureThread(session, { cwd: args.cwd, model: args.model });
 
   // Create task record
   const task = session.createTask(args.task);

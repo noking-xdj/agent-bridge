@@ -18,16 +18,7 @@ export async function handleCodexExec(
 ): Promise<string> {
   const session = bridge.getOrCreateSession();
 
-  if (!session.codexThreadId) {
-    const thread = await bridge.codexClient.startThread({
-      cwd: args.cwd ?? process.cwd(),
-      approvalPolicy: "full-auto",
-      sandbox: bridge.config.codex.sandbox ?? "none",
-      model: bridge.config.codex.model,
-    });
-    session.codexThreadId = thread.id;
-    session.status = "active";
-  }
+  await bridge.ensureThread(session, { cwd: args.cwd });
 
   const instruction = `Execute the following command and report the output:\n\`\`\`\n${args.command}\n\`\`\``;
   const task = session.createTask(`Exec: ${args.command}`);

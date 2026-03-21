@@ -32,22 +32,23 @@ export type JsonRpcMessage = JsonRpcRequest | JsonRpcResponse | JsonRpcNotificat
 // --- Codex-specific types ---
 
 export interface InitializeParams {
-  clientName: string;
-  clientVersion: string;
+  clientInfo: {
+    name: string;
+    version: string;
+  };
   protocolVersion: string;
 }
 
 export interface InitializeResult {
-  protocolVersion: string;
-  serverName: string;
-  serverVersion: string;
-  capabilities: Record<string, unknown>;
+  userAgent: string;
+  platformFamily: string;
+  platformOs: string;
 }
 
 export interface ThreadStartParams {
   cwd: string;
-  approvalPolicy?: "auto-edit" | "by-patch" | "full-auto";
-  sandbox?: "none" | "light";
+  approvalPolicy?: "untrusted" | "on-failure" | "on-request" | "granular" | "never";
+  sandbox?: "read-only" | "workspace-write" | "danger-full-access";
   model?: string;
 }
 

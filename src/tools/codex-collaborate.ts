@@ -39,20 +39,7 @@ export async function handleCodexCollaborate(
 ): Promise<string> {
   const session = bridge.getOrCreateSession();
 
-  // Ensure Codex thread exists
-  if (!session.codexThreadId) {
-    const thread = await bridge.codexClient.startThread({
-      cwd: args.cwd ?? process.cwd(),
-      approvalPolicy: "full-auto",
-      sandbox: bridge.config.codex.sandbox ?? "none",
-      model: bridge.config.codex.model,
-    });
-    session.codexThreadId = thread.id;
-    session.status = "active";
-  }
-
-  // Lazy-init Codex
-  await bridge.initializeCodex();
+  await bridge.ensureThread(session, { cwd: args.cwd });
 
   const collaboration = bridge.getCollaborationManager();
   if (!collaboration) {

@@ -12,7 +12,7 @@ async function main() {
       transport: "stdio",
       model: process.env.CODEX_MODEL,
       approvalPolicy: "auto",
-      sandbox: "none",
+      sandbox: "danger-full-access",
     },
   });
 
