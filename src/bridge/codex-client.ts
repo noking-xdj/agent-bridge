@@ -121,7 +121,13 @@ export class CodexClient {
 
     // Step 2: Wait for the WS server to be ready, then connect
     logger.info(`Waiting for Codex app-server on ${url}...`);
-    await this.connectWebSocketWithRetry(url, 10, 1000);
+    try {
+      await this.connectWebSocketWithRetry(url, 10, 1000);
+    } catch (err) {
+      // Clean up the spawned process on connection failure
+      this.processManager.stop();
+      throw err;
+    }
   }
 
   private async connectWebSocketWithRetry(
@@ -145,11 +151,23 @@ export class CodexClient {
     }
   }
 
-  private connectWebSocket(url: string): Promise<void> {
+  private connectWebSocket(url: string, timeoutMs = 10_000): Promise<void> {
     return new Promise<void>((resolve, reject) => {
       const ws = new WebSocket(url);
+      let settled = false;
+
+      const timer = setTimeout(() => {
+        if (!settled) {
+          settled = true;
+          ws.terminate();
+          reject(new CodexConnectionError(`WebSocket connect timed out after ${timeoutMs}ms`));
+        }
+      }, timeoutMs);
 
       ws.on("open", () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
         logger.info("WebSocket connected to Codex app-server");
         this.ws = ws;
         resolve();
@@ -162,12 +180,20 @@ export class CodexClient {
       });
 
       ws.on("close", () => {
-        logger.warn("WebSocket connection closed");
-        this.handleDisconnect();
+        if (!settled) {
+          settled = true;
+          clearTimeout(timer);
+          reject(new CodexConnectionError("WebSocket closed during connect"));
+        } else {
+          logger.warn("WebSocket connection closed");
+          this.handleDisconnect();
+        }
       });
 
       ws.on("error", (err) => {
-        if (!this.ws) {
+        if (!settled) {
+          settled = true;
+          clearTimeout(timer);
           reject(err);
         } else {
           logger.error("WebSocket error:", err.message);

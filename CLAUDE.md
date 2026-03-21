@@ -12,7 +12,7 @@ npm run test:watch  # Watch mode
 ## Architecture
 MCP Server bridging Claude Code (MCP protocol) and Codex CLI (JSON-RPC).
 ```
-Claude Code ←(MCP/stdio)→ AgentBridge ←(JSON-RPC/stdio)→ Codex app-server
+Claude Code ←(MCP/stdio)→ AgentBridge ←(WebSocket)→ Codex app-server ←(WebSocket)→ Codex TUI
 ```
 
 Key directories:
@@ -30,10 +30,20 @@ Key directories:
 - `sandbox` values: `read-only | workspace-write | danger-full-access`
 - `initialized` is a notification (no id), not a request
 - Codex app-server is experimental — protocol not fully documented
+- WebSocket messages are already framed — no newline delimiter, append `\n` before feeding to `parseBuffer`
+- Codex TUI connects via: `codex --enable tui_app_server --remote ws://127.0.0.1:<port>`
 
 ## MCP Configuration
 Global: `~/.claude.json` (added via `claude mcp add agent-bridge --scope user`)
-Env: `CODEX_PATH` = path to codex binary, `CODEX_MODEL` = model override
+Env: `CODEX_PATH` = path to codex binary, `CODEX_MODEL` = model override, `CODEX_WS_PORT` = WebSocket port (default 4501)
 
 ## Testing
 All tests in `tests/unit/`. Mock Codex client for collaboration tests must include `offNotification`.
+
+## Key Design Decisions
+- Default transport is WebSocket (not stdio) so Codex TUI can connect to the same app-server
+- Bridge writes thread ID to `/tmp/agent-bridge-thread-id` for `codex-bridge` auto-resume
+- Single-flight guards on `initializeCodex()` and `ensureThread()` prevent concurrent races
+- Notification buffering prevents message loss when Codex responds before accumulator is registered
+- Process exit handler registered only once to prevent accumulation across reconnects
+- Failed WebSocket connections clean up the spawned Codex process

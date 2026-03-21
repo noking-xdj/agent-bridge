@@ -29,6 +29,7 @@ export class AgentBridge {
   private collaborationManager: CollaborationManager | null = null;
   private activeAccumulators = new Map<string, TurnAccumulator>();
   private codexInitialized = false;
+  private exitHandlerRegistered = false;
   // Single-flight guards to prevent concurrent init/thread creation
   private initPromise: Promise<void> | null = null;
   private threadPromises = new Map<string, Promise<void>>();
@@ -79,7 +80,10 @@ export class AgentBridge {
         .initialize()
         .then(() => {
           this.codexInitialized = true;
-          this.setupProcessExitHandler();
+          if (!this.exitHandlerRegistered) {
+            this.setupProcessExitHandler();
+            this.exitHandlerRegistered = true;
+          }
         })
         .catch((err) => {
           this.initPromise = null;
@@ -249,8 +253,11 @@ export class AgentBridge {
     const buf = this.notificationBuffer.get(turnId) ?? [];
     buf.push({ method, params });
     this.notificationBuffer.set(turnId, buf);
-    // Auto-expire buffer after 10s to avoid leaks
-    setTimeout(() => this.notificationBuffer.delete(turnId), 10_000);
+    // Auto-expire buffer after 120s (matches delegate timeout) to avoid leaks
+    // for turns that are never claimed by an accumulator
+    if (buf.length === 1) {
+      setTimeout(() => this.notificationBuffer.delete(turnId), 120_000);
+    }
   }
 
   /**
