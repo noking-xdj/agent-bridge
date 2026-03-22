@@ -1,4 +1,3 @@
-import { writeFileSync } from "node:fs";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { CodexClient } from "./codex-client.js";
 import { CollaborationManager } from "./collaboration.js";
@@ -25,6 +24,8 @@ export class AgentBridge {
   readonly codexClient: CodexClient;
   readonly sessionManager = new SessionManager();
   readonly config: AgentBridgeConfig;
+  /** Callback when a Codex thread is created — used by index.ts to update state file. */
+  onThreadCreated: ((threadId: string) => void) | null = null;
   private mcpServer: McpServer;
   private collaborationManager: CollaborationManager | null = null;
   private activeAccumulators = new Map<string, TurnAccumulator>();
@@ -121,10 +122,9 @@ export class AgentBridge {
       });
       session.codexThreadId = thread.id;
       session.status = "active";
-      // Write thread ID to file so TUI can auto-resume
+      // Notify listener (index.ts updates the state file)
       try {
-        writeFileSync("/tmp/agent-bridge-thread-id", thread.id);
-        logger.info(`Thread ID written to /tmp/agent-bridge-thread-id: ${thread.id}`);
+        this.onThreadCreated?.(thread.id);
       } catch {
         // Best effort
       }
