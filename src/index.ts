@@ -1,3 +1,5 @@
+import { execSync } from "node:child_process";
+import { unlinkSync } from "node:fs";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { AgentBridge } from "./bridge/agent-bridge.js";
 import { loadConfig } from "./utils/config.js";
@@ -6,15 +8,31 @@ import { logger } from "./utils/logger.js";
 async function main() {
   logger.info("Starting AgentBridge MCP Server");
 
-  // WebSocket mode (default): Bridge spawns codex app-server on a WS port,
-  // then connects as a client. The user can also connect with:
-  //   codex --enable tui_app_server --remote ws://127.0.0.1:<port>
-  // to see the conversation in real-time in Codex's native TUI.
-  //
-  // Set CODEX_TRANSPORT=stdio to use stdio mode instead (no TUI viewing).
   const transport = (process.env.CODEX_TRANSPORT ?? "ws") as "stdio" | "ws";
   const wsPort = process.env.CODEX_WS_PORT ?? "4501";
   const wsUrl = `ws://127.0.0.1:${wsPort}`;
+
+  // Clean up stale state from previous sessions
+  if (transport === "ws") {
+    try {
+      // Kill any leftover codex app-server on this port
+      const pids = execSync(`lsof -ti:${wsPort} 2>/dev/null`, { encoding: "utf-8" }).trim();
+      if (pids) {
+        execSync(`kill ${pids.split("\n").join(" ")} 2>/dev/null`);
+        logger.info(`Cleaned up stale processes on port ${wsPort}`);
+        // Wait briefly for port to free
+        await new Promise((r) => setTimeout(r, 500));
+      }
+    } catch {
+      // No stale processes — good
+    }
+    // Remove stale thread ID file
+    try {
+      unlinkSync("/tmp/agent-bridge-thread-id");
+    } catch {
+      // Didn't exist — fine
+    }
+  }
 
   const config = loadConfig({
     codex: {
