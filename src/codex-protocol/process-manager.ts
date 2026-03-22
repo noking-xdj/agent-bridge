@@ -60,18 +60,28 @@ export class ProcessManager {
     return this.process;
   }
 
-  stop(): void {
-    if (this.process && !this._exited) {
+  stop(): Promise<void> {
+    if (!this.process || this._exited) {
+      return Promise.resolve();
+    }
+
+    return new Promise<void>((resolve) => {
       logger.info("Stopping Codex process");
-      this.process.kill("SIGTERM");
-      // Force kill after 5s
+      const proc = this.process!;
+
       const forceKillTimer = setTimeout(() => {
         if (!this._exited) {
-          this.process?.kill("SIGKILL");
+          proc.kill("SIGKILL");
         }
       }, 5000);
-      this.process.on("exit", () => clearTimeout(forceKillTimer));
-    }
+
+      proc.on("exit", () => {
+        clearTimeout(forceKillTimer);
+        resolve();
+      });
+
+      proc.kill("SIGTERM");
+    });
   }
 
   getProcess(): ChildProcess {

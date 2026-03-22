@@ -125,7 +125,7 @@ export class CodexClient {
       await this.connectWebSocketWithRetry(url, 10, 1000);
     } catch (err) {
       // Clean up the spawned process on connection failure
-      this.processManager.stop();
+      await this.processManager.stop();
       throw err;
     }
   }
@@ -262,6 +262,11 @@ export class CodexClient {
     this.processExitHandlers.push(handler);
   }
 
+  /** Get the child process PID (for state file tracking). */
+  get childPid(): number | undefined {
+    return this.process?.pid;
+  }
+
   async close(): Promise<void> {
     for (const [, pending] of this.pendingRequests) {
       clearTimeout(pending.timer);
@@ -272,7 +277,7 @@ export class CodexClient {
       this.ws.close();
       this.ws = null;
     }
-    this.processManager.stop();
+    await this.processManager.stop();
     this.initialized = false;
   }
 

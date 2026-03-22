@@ -153,10 +153,29 @@ export class CollaborationManager {
 
     const accumulator = new TurnAccumulator();
     const turnParams = buildTurnParams(session.codexThreadId, fullMessage);
-    const turn = await this.codexClient.startTurn(turnParams);
 
-    // Register temporary handlers for this turn
-    const cleanup = this.registerTurnHandlers(turn.id, accumulator);
+    // Register handlers BEFORE startTurn to avoid losing early notifications.
+    // We use a temporary turnId holder that gets set once startTurn returns.
+    let turnId: string | null = null;
+    const pendingEvents: Array<{ method: string; params: unknown }> = [];
+
+    const preCleanup = this.registerTurnHandlersBuffered(
+      () => turnId,
+      accumulator,
+      pendingEvents,
+    );
+
+    const turn = await this.codexClient.startTurn(turnParams);
+    turnId = turn.id;
+
+    // Flush any events that arrived during startTurn
+    for (const evt of pendingEvents) {
+      this.dispatchToAccumulator(evt.method, evt.params, accumulator, turn.id);
+    }
+
+    const cleanup = () => {
+      preCleanup();
+    };
 
     let timeoutTimer: ReturnType<typeof setTimeout> | undefined;
     try {
@@ -284,6 +303,72 @@ export class CollaborationManager {
         this.codexClient.offNotification(method, handler);
       }
     };
+  }
+
+  /**
+   * Register handlers that buffer events until the turnId is known.
+   * Events arriving before turnId is set are stored in pendingEvents.
+   */
+  private registerTurnHandlersBuffered(
+    getTurnId: () => string | null,
+    accumulator: TurnAccumulator,
+    pendingEvents: Array<{ method: string; params: unknown }>,
+  ): () => void {
+    const registered: Array<{ method: string; handler: (params: unknown) => void }> = [];
+    const methods = [
+      "item/agentMessage/delta",
+      "item/commandExecution/outputDelta",
+      "item/completed",
+      "turn/completed",
+    ];
+
+    for (const method of methods) {
+      const handler = (params: unknown) => {
+        const tid = getTurnId();
+        if (!tid) {
+          // Turn not started yet — buffer the event
+          pendingEvents.push({ method, params });
+          return;
+        }
+        this.dispatchToAccumulator(method, params, accumulator, tid);
+      };
+      this.codexClient.onNotification(method, handler);
+      registered.push({ method, handler });
+    }
+
+    return () => {
+      for (const { method, handler } of registered) {
+        this.codexClient.offNotification(method, handler);
+      }
+    };
+  }
+
+  private dispatchToAccumulator(
+    method: string,
+    params: unknown,
+    accumulator: TurnAccumulator,
+    turnId: string,
+  ): void {
+    const p = params as Record<string, unknown>;
+    const eventTurnId =
+      (p.turnId as string) ??
+      ((p.turn as Record<string, unknown>)?.id as string);
+    if (eventTurnId !== turnId) return;
+
+    switch (method) {
+      case "item/agentMessage/delta":
+        accumulator.appendAgentDelta(params as AgentMessageDeltaParams);
+        break;
+      case "item/commandExecution/outputDelta":
+        accumulator.appendCommandOutput(params as CommandOutputDeltaParams);
+        break;
+      case "item/completed":
+        accumulator.addCompletedItem(params as ItemCompletedParams);
+        break;
+      case "turn/completed":
+        accumulator.finalize(params as TurnCompletedParams);
+        break;
+    }
   }
 
   /**

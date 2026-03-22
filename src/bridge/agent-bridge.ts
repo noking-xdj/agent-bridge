@@ -24,6 +24,8 @@ export class AgentBridge {
   readonly codexClient: CodexClient;
   readonly sessionManager = new SessionManager();
   readonly config: AgentBridgeConfig;
+  /** Callback when Codex process starts — used to persist child PID for cleanup. */
+  onCodexStarted: ((childPid: number) => void) | null = null;
   /** Callback when a Codex thread is created — used by index.ts to update state file. */
   onThreadCreated: ((threadId: string) => void) | null = null;
   private mcpServer: McpServer;
@@ -84,6 +86,15 @@ export class AgentBridge {
           if (!this.exitHandlerRegistered) {
             this.setupProcessExitHandler();
             this.exitHandlerRegistered = true;
+          }
+          // Notify with child PID immediately after process starts
+          const pid = this.codexClient.childPid;
+          if (pid) {
+            try {
+              this.onCodexStarted?.(pid);
+            } catch {
+              // Best effort
+            }
           }
         })
         .catch((err) => {

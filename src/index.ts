@@ -44,19 +44,20 @@ function cleanupStale(hash: string): void {
   const filePath = stateFilePath(hash);
   try {
     const data = JSON.parse(readFileSync(filePath, "utf-8"));
-    if (data.port) {
+    // Only kill the specific PID recorded by the previous bridge instance,
+    // not whatever happens to be on the port (could be an unrelated service)
+    if (data.pid) {
       try {
-        const pids = execSync(`lsof -ti:${data.port} 2>/dev/null`, {
+        // Verify it's actually a codex app-server for this project before killing
+        const cmdline = execSync(`ps -p ${data.pid} -o command= 2>/dev/null`, {
           encoding: "utf-8",
         }).trim();
-        if (pids) {
-          execSync(`kill ${pids.split("\n").join(" ")} 2>/dev/null`);
-          logger.info(
-            `Cleaned up stale processes on port ${data.port}`,
-          );
+        if (cmdline.includes("codex") && cmdline.includes("app-server")) {
+          execSync(`kill ${data.pid} 2>/dev/null`);
+          logger.info(`Cleaned up stale codex app-server (pid: ${data.pid})`);
         }
       } catch {
-        // No processes
+        // Process already gone
       }
     }
     unlinkSync(filePath);
@@ -95,8 +96,8 @@ async function main() {
       : await findFreePort();
     wsUrl = `ws://127.0.0.1:${wsPort}`;
 
-    // Write initial state (threadId will be updated later)
-    writeState(hash, { port: wsPort, cwd, pid: process.pid });
+    // Write initial state (threadId and codex pid will be updated on first use)
+    writeState(hash, { port: wsPort, cwd, pid: 0 });
 
     // Brief wait for port cleanup
     await new Promise((r) => setTimeout(r, 300));
@@ -121,10 +122,21 @@ async function main() {
 
   const bridge = new AgentBridge(config);
 
-  // Override the thread ID writer to update the state file
+  // Persist codex child PID as soon as it starts
+  let codexChildPid = 0;
+  bridge.onCodexStarted = (pid: number) => {
+    codexChildPid = pid;
+    if (wsPort) {
+      writeState(hash, { port: wsPort, cwd, pid });
+      logger.info(`State updated with codex pid ${pid}`);
+    }
+  };
+
+  // Update state with thread ID when conversation starts
   bridge.onThreadCreated = (threadId: string) => {
     if (wsPort) {
-      writeState(hash, { port: wsPort, cwd, threadId, pid: process.pid });
+      // Store the codex child PID (not the bridge PID) for stale cleanup
+      writeState(hash, { port: wsPort, cwd, threadId, pid: codexChildPid });
       logger.info(`State updated with thread ${threadId}`);
     }
   };
