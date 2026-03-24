@@ -1,5 +1,7 @@
 # AgentBridge
 
+[中文文档](./README.zh-CN.md)
+
 Claude Code and Codex autonomous collaboration through MCP/JSON-RPC protocol bridging.
 
 ```
