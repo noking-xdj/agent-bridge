@@ -6,12 +6,24 @@ Claude Code and Codex autonomous collaboration through MCP/JSON-RPC protocol bri
 Claude Code ←(MCP/stdio)→ AgentBridge ←(WebSocket)→ Codex app-server ←(WebSocket)→ Codex TUI
 ```
 
+## Prerequisites
+
+| Dependency | Version | Install |
+|-----------|---------|---------|
+| **Node.js** | >= 18 | [nodejs.org](https://nodejs.org/) |
+| **Claude Code** | latest | `npm install -g @anthropic-ai/claude-code` |
+| **Codex CLI** | latest | `npm install -g @openai/codex` |
+
+You also need valid API keys configured:
+- **Anthropic API key** for Claude Code (`ANTHROPIC_API_KEY`)
+- **OpenAI API key** for Codex (`OPENAI_API_KEY`)
+
 ## Quick Start
 
 ### 1. Install
 
 ```bash
-cd claude_and_codex
+git clone <repo-url> && cd claude_and_codex
 npm install
 npm run build
 ```
