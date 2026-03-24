@@ -9,7 +9,6 @@ import type { BridgeSession, TaskRecord } from "../sessions/session.js";
 import { logger } from "../utils/logger.js";
 import type {
   AgentMessageDeltaParams,
-  CommandOutputDeltaParams,
   ItemCompletedParams,
   TurnCompletedParams,
 } from "../codex-protocol/types.js";
@@ -283,10 +282,7 @@ export class CollaborationManager {
       if (p.turnId === turnId) accumulator.appendAgentDelta(p);
     });
 
-    addHandler("item/commandExecution/outputDelta", (params) => {
-      const p = params as CommandOutputDeltaParams;
-      if (p.turnId === turnId) accumulator.appendCommandOutput(p);
-    });
+    // item/commandExecution/outputDelta opted-out at protocol level; no handler needed
 
     addHandler("item/completed", (params) => {
       const p = params as ItemCompletedParams;
@@ -317,7 +313,7 @@ export class CollaborationManager {
     const registered: Array<{ method: string; handler: (params: unknown) => void }> = [];
     const methods = [
       "item/agentMessage/delta",
-      "item/commandExecution/outputDelta",
+      // item/commandExecution/outputDelta opted-out at protocol level
       "item/completed",
       "turn/completed",
     ];
@@ -359,9 +355,7 @@ export class CollaborationManager {
       case "item/agentMessage/delta":
         accumulator.appendAgentDelta(params as AgentMessageDeltaParams);
         break;
-      case "item/commandExecution/outputDelta":
-        accumulator.appendCommandOutput(params as CommandOutputDeltaParams);
-        break;
+      // item/commandExecution/outputDelta opted-out at protocol level
       case "item/completed":
         accumulator.addCompletedItem(params as ItemCompletedParams);
         break;

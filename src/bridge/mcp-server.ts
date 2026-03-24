@@ -42,201 +42,216 @@ import {
   handleSharedContextDelete,
 } from "../tools/shared-context.js";
 import { logger } from "../utils/logger.js";
+import type { ToolAnnotations } from "@modelcontextprotocol/sdk/types.js";
+
+/**
+ * Wraps a tool handler with standard error handling.
+ * Eliminates duplicated try/catch across all tool registrations.
+ */
+function wrapHandler<TArgs>(
+  name: string,
+  handler: (bridge: AgentBridge, args: TArgs) => Promise<string>,
+  bridge: AgentBridge,
+) {
+  return async (args: TArgs) => {
+    try {
+      const result = await handler(bridge, args);
+      return { content: [{ type: "text" as const, text: result }] };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      logger.error(`${name} error:`, msg);
+      return {
+        content: [{ type: "text" as const, text: `Error: ${msg}` }],
+        isError: true,
+      };
+    }
+  };
+}
 
 export function createMcpServer(bridge: AgentBridge): McpServer {
   const server = new McpServer({
-    name: "AgentBridge",
+    name: "agent-bridge-mcp-server",
     version: "0.1.0",
   });
 
-  // Register tools
-  server.tool(
+  // --- Codex tools ---
+
+  server.registerTool(
     "codex_delegate",
-    codexDelegateDescription(),
-    codexDelegateSchema,
-    async (args) => {
-      try {
-        const result = await handleCodexDelegate(bridge, args);
-        return { content: [{ type: "text" as const, text: result }] };
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        logger.error("codex_delegate error:", msg);
-        return {
-          content: [{ type: "text" as const, text: `Error: ${msg}` }],
-          isError: true,
-        };
-      }
+    {
+      title: "Delegate Task to Codex",
+      description: codexDelegateDescription(),
+      inputSchema: codexDelegateSchema,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: true,
+        idempotentHint: false,
+        openWorldHint: true,
+      } satisfies ToolAnnotations,
     },
+    wrapHandler("codex_delegate", handleCodexDelegate, bridge),
   );
 
-  server.tool(
+  server.registerTool(
     "codex_ask",
-    codexAskDescription(),
-    codexAskSchema,
-    async (args) => {
-      try {
-        const result = await handleCodexAsk(bridge, args);
-        return { content: [{ type: "text" as const, text: result }] };
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        return {
-          content: [{ type: "text" as const, text: `Error: ${msg}` }],
-          isError: true,
-        };
-      }
+    {
+      title: "Ask Codex a Question",
+      description: codexAskDescription(),
+      inputSchema: codexAskSchema,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: true,
+      } satisfies ToolAnnotations,
     },
+    wrapHandler("codex_ask", handleCodexAsk, bridge),
   );
 
-  server.tool(
+  server.registerTool(
     "codex_status",
-    codexStatusDescription(),
-    codexStatusSchema,
-    async (args) => {
-      try {
-        const result = await handleCodexStatus(bridge, args);
-        return { content: [{ type: "text" as const, text: result }] };
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        return {
-          content: [{ type: "text" as const, text: `Error: ${msg}` }],
-          isError: true,
-        };
-      }
+    {
+      title: "Check Task Status",
+      description: codexStatusDescription(),
+      inputSchema: codexStatusSchema,
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      } satisfies ToolAnnotations,
     },
+    wrapHandler("codex_status", handleCodexStatus, bridge),
   );
 
-  server.tool(
+  server.registerTool(
     "codex_exec",
-    codexExecDescription(),
-    codexExecSchema,
-    async (args) => {
-      try {
-        const result = await handleCodexExec(bridge, args);
-        return { content: [{ type: "text" as const, text: result }] };
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        return {
-          content: [{ type: "text" as const, text: `Error: ${msg}` }],
-          isError: true,
-        };
-      }
+    {
+      title: "Execute Command via Codex",
+      description: codexExecDescription(),
+      inputSchema: codexExecSchema,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: true,
+        idempotentHint: false,
+        openWorldHint: true,
+      } satisfies ToolAnnotations,
     },
+    wrapHandler("codex_exec", handleCodexExec, bridge),
   );
 
-  server.tool(
+  server.registerTool(
     "codex_review",
-    codexReviewDescription(),
-    codexReviewSchema,
-    async (args) => {
-      try {
-        const result = await handleCodexReview(bridge, args);
-        return { content: [{ type: "text" as const, text: result }] };
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        return {
-          content: [{ type: "text" as const, text: `Error: ${msg}` }],
-          isError: true,
-        };
-      }
+    {
+      title: "Code Review via Codex",
+      description: codexReviewDescription(),
+      inputSchema: codexReviewSchema,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: true,
+      } satisfies ToolAnnotations,
     },
+    wrapHandler("codex_review", handleCodexReview, bridge),
   );
 
-  server.tool(
+  server.registerTool(
     "codex_collaborate",
-    codexCollaborateDescription(),
-    codexCollaborateSchema,
-    async (args) => {
-      try {
-        const result = await handleCodexCollaborate(bridge, args);
-        return { content: [{ type: "text" as const, text: result }] };
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        logger.error("codex_collaborate error:", msg);
-        return {
-          content: [{ type: "text" as const, text: `Error: ${msg}` }],
-          isError: true,
-        };
-      }
+    {
+      title: "Claude-Codex Collaboration",
+      description: codexCollaborateDescription(),
+      inputSchema: codexCollaborateSchema,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: true,
+        idempotentHint: false,
+        openWorldHint: true,
+      } satisfies ToolAnnotations,
     },
+    wrapHandler("codex_collaborate", handleCodexCollaborate, bridge),
   );
 
-  server.tool(
+  // --- Shared context tools ---
+
+  server.registerTool(
     "shared_context_write",
-    sharedContextWriteDescription(),
-    sharedContextWriteSchema,
-    async (args) => {
-      try {
-        const result = await handleSharedContextWrite(bridge, args);
-        return { content: [{ type: "text" as const, text: result }] };
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        return {
-          content: [{ type: "text" as const, text: `Error: ${msg}` }],
-          isError: true,
-        };
-      }
+    {
+      title: "Write Shared Context",
+      description: sharedContextWriteDescription(),
+      inputSchema: sharedContextWriteSchema,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: true,
+        idempotentHint: true,
+        openWorldHint: false,
+      } satisfies ToolAnnotations,
     },
+    wrapHandler("shared_context_write", handleSharedContextWrite, bridge),
   );
 
-  server.tool(
+  server.registerTool(
     "shared_context_read",
-    sharedContextReadDescription(),
-    sharedContextReadSchema,
-    async (args) => {
-      try {
-        const result = await handleSharedContextRead(bridge, args);
-        return { content: [{ type: "text" as const, text: result }] };
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        return {
-          content: [{ type: "text" as const, text: `Error: ${msg}` }],
-          isError: true,
-        };
-      }
+    {
+      title: "Read Shared Context",
+      description: sharedContextReadDescription(),
+      inputSchema: sharedContextReadSchema,
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      } satisfies ToolAnnotations,
     },
+    wrapHandler("shared_context_read", handleSharedContextRead, bridge),
   );
 
-  server.tool(
+  server.registerTool(
     "shared_context_delete",
-    sharedContextDeleteDescription(),
-    sharedContextDeleteSchema,
-    async (args) => {
-      try {
-        const result = await handleSharedContextDelete(bridge, args);
-        return { content: [{ type: "text" as const, text: result }] };
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        return {
-          content: [{ type: "text" as const, text: `Error: ${msg}` }],
-          isError: true,
-        };
-      }
+    {
+      title: "Delete Shared Context",
+      description: sharedContextDeleteDescription(),
+      inputSchema: sharedContextDeleteSchema,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: true,
+        idempotentHint: true,
+        openWorldHint: false,
+      } satisfies ToolAnnotations,
     },
+    wrapHandler("shared_context_delete", handleSharedContextDelete, bridge),
   );
 
-  // Register resources
-  server.resource(
+  // --- Resources ---
+
+  server.registerResource(
     "session-info",
     "bridge://session",
-    { description: "Current AgentBridge session information" },
+    {
+      description: "Current AgentBridge session information including thread ID, status, and task count",
+      mimeType: "application/json",
+    },
     async () => {
       const session = bridge.sessionManager.getActiveSession();
       const text = session
         ? JSON.stringify(session.toSummary(), null, 2)
-        : "No active session";
+        : JSON.stringify({ status: "no_active_session" });
       return { contents: [{ uri: "bridge://session", text }] };
     },
   );
 
-  server.resource(
+  server.registerResource(
     "task-list",
     "bridge://tasks",
-    { description: "List of all delegated tasks and their statuses" },
+    {
+      description: "List of all delegated tasks and their statuses (id, description, status, completedAt)",
+      mimeType: "application/json",
+    },
     async () => {
       const session = bridge.sessionManager.getActiveSession();
       if (!session) {
         return {
-          contents: [{ uri: "bridge://tasks", text: "No active session" }],
+          contents: [{ uri: "bridge://tasks", text: JSON.stringify([]) }],
         };
       }
       const tasks = Array.from(session.tasks.values()).map((t) => ({

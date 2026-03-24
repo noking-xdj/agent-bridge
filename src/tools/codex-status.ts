@@ -5,15 +5,28 @@ export const codexStatusSchema = {
   taskId: z
     .string()
     .optional()
-    .describe("Specific task ID to check, or omit for all tasks"),
+    .describe("Specific task ID to check. Omit to list all tasks in the session."),
   sessionId: z
     .string()
     .optional()
-    .describe("Specific session ID, or omit for active session"),
+    .describe("Specific session ID. Omit to use the active session."),
 };
 
 export function codexStatusDescription(): string {
-  return "Check the status of delegated tasks and the current Codex session.";
+  return `Check the status of delegated tasks and the current Codex session.
+
+Use this after codex_delegate with waitForCompletion=false to poll task progress.
+
+Args:
+  - taskId (string, optional): Specific task ID to check. Returns detailed info including partial result.
+  - sessionId (string, optional): Session to query. Defaults to the active session.
+
+Returns:
+  JSON with session summary and task statuses. For a specific task, includes result preview (first 500 chars).
+
+Error handling:
+  - Returns a message if no active session exists.
+  - Returns a message if the specified taskId is not found.`;
 }
 
 export async function handleCodexStatus(
@@ -50,7 +63,6 @@ export async function handleCodexStatus(
     );
   }
 
-  // Return session summary with all tasks
   const tasks = Array.from(session.tasks.values()).map((t) => ({
     id: t.id,
     description: t.description,

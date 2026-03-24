@@ -13,18 +13,35 @@ export const codexCollaborateSchema = {
   initiator: z
     .enum(["claude", "codex"])
     .default("claude")
-    .describe("Which agent starts the collaboration"),
+    .describe("Which agent starts the collaboration (default: 'claude')"),
   maxRounds: z
     .number()
+    .int()
     .min(1)
     .max(20)
     .default(6)
-    .describe("Maximum number of back-and-forth rounds"),
+    .describe("Maximum number of back-and-forth rounds (default: 6, max: 20)"),
   cwd: z.string().optional().describe("Working directory for Codex"),
 };
 
 export function codexCollaborateDescription(): string {
-  return "Start a bidirectional collaboration between Claude and Codex. Both agents take turns contributing towards a shared goal, seeing each other's responses and building on them.";
+  return `Start a bidirectional collaboration between Claude and Codex. Both agents take turns contributing towards a shared goal, seeing each other's responses and building on them.
+
+The collaboration ends when an agent includes "[COLLABORATION_COMPLETE]" in its response, maxRounds is reached, or timeout occurs. Requires MCP sampling support from the client.
+
+Args:
+  - goal (string, required): The shared objective both agents work toward.
+  - initialMessage (string, required): The first message to start the conversation.
+  - initiator ('claude' | 'codex', optional): Who goes first (default: 'claude').
+  - maxRounds (number, optional): Max rounds of back-and-forth (default: 6, max: 20).
+  - cwd (string, optional): Working directory for Codex.
+
+Returns:
+  Formatted collaboration transcript with all rounds, outcome, and the final message.
+
+Examples:
+  - goal="Design and implement a REST API for user management" → collaborative architecture + implementation
+  - goal="Debug the failing integration test in tests/api.test.ts" → joint debugging session`;
 }
 
 export async function handleCodexCollaborate(
@@ -58,7 +75,6 @@ export async function handleCodexCollaborate(
       timeoutMs: bridge.config.bridge.delegateTimeoutMs,
     });
 
-    // Format the result
     const sections: string[] = [
       `## Collaboration Result`,
       `**Goal**: ${args.goal}`,

@@ -37,6 +37,10 @@ export interface InitializeParams {
     version: string;
   };
   protocolVersion: string;
+  capabilities?: {
+    experimentalApi?: boolean;
+    optOutNotificationMethods?: string[];
+  };
 }
 
 export interface InitializeResult {

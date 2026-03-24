@@ -46,23 +46,46 @@ Ask Codex what it thinks about this codebase
 
 ### MCP Tools
 
-| Tool | Description |
-|------|-------------|
-| `codex_delegate` | Delegate a task to Codex (write code, run commands, etc.) |
-| `codex_ask` | Ask Codex a question and get a response |
-| `codex_collaborate` | Bidirectional collaboration — both agents take turns |
-| `codex_exec` | Have Codex execute a shell command |
-| `codex_review` | Have Codex perform a code review |
-| `codex_status` | Check status of delegated tasks |
-| `shared_context_write` | Write to shared context store |
-| `shared_context_read` | Read from shared context store |
-| `shared_context_delete` | Delete from shared context store |
+All tools use the modern `registerTool()` API with [Tool Annotations](#tool-annotations) for accurate safety/planning hints.
+
+| Tool | Description | Annotations |
+|------|-------------|-------------|
+| `codex_delegate` | Delegate a task to Codex (write code, run commands, etc.) | destructive, open-world |
+| `codex_ask` | Ask Codex a question and get a response | open-world |
+| `codex_collaborate` | Bidirectional collaboration — both agents take turns | destructive, open-world |
+| `codex_exec` | Have Codex execute a shell command | destructive, open-world |
+| `codex_review` | Have Codex perform a code review | open-world |
+| `codex_status` | Check status of delegated tasks | read-only, idempotent |
+| `shared_context_write` | Write to shared context store | destructive (overwrites), idempotent |
+| `shared_context_read` | Read from shared context store | read-only, idempotent |
+| `shared_context_delete` | Delete from shared context store | destructive, idempotent |
+
+### Tool Annotations
+
+Each tool declares `readOnlyHint`, `destructiveHint`, `idempotentHint`, and `openWorldHint` to help MCP clients make informed planning and safety decisions. All Codex-backed tools are marked `openWorldHint: true` since they execute real Codex turns with full sandbox access.
 
 ### Collaboration Modes
 
 **One-directional**: Claude delegates tasks to Codex via `codex_delegate`, `codex_ask`, `codex_exec`, `codex_review`. Claude is the orchestrator, Codex executes.
 
 **Bidirectional**: `codex_collaborate` starts a multi-turn conversation where both agents take turns contributing toward a shared goal. Uses MCP Sampling to let Codex "talk back" to Claude.
+
+### Smart Output Summarization
+
+Codex responses are intelligently summarized to avoid bloating Claude Code's context window:
+
+| Content Type | Strategy | Budget |
+|-------------|----------|--------|
+| Agent message | Full text preserved | Unlimited |
+| File changes (diff) | Full diff preserved | Unlimited |
+| Successful commands | Head 6 + tail 2 lines | 600 chars |
+| Failed commands | Head 5 + tail 20 lines + error keyword extraction | 2,500 chars |
+| MCP tool output (JSON) | Structural summary (top-level keys, array length, error.message) | 800 chars |
+| MCP tool output (text) | Head 8 + tail 4 lines | 800 chars |
+
+This reduces typical return payloads from ~70K chars (raw shell output + API JSON) down to ~2-3K of actionable content.
+
+**Protocol-level optimization**: The bridge opts out of `item/commandExecution/outputDelta` via `initialize.capabilities.optOutNotificationMethods`, preventing unnecessary streaming command output from ever being transmitted.
 
 ### Real-time TUI Viewing
 
@@ -92,8 +115,8 @@ src/
 │   ├── agent-bridge.ts         # Main orchestrator
 │   ├── codex-client.ts         # JSON-RPC client (stdio + WebSocket)
 │   ├── collaboration.ts        # Bidirectional collaboration manager
-│   ├── mcp-server.ts           # MCP tool/resource registration
-│   └── protocol-translator.ts  # Turn accumulator + protocol translation
+│   ├── mcp-server.ts           # MCP tool/resource registration (registerTool API)
+│   └── protocol-translator.ts  # Turn accumulator + smart output summarization
 ├── codex-protocol/
 │   ├── types.ts                # Codex JSON-RPC protocol types
 │   ├── json-rpc.ts             # Message framing and parsing
@@ -106,12 +129,27 @@ src/
 └── utils/                      # Config, logger, errors, events
 ```
 
+## Codex Protocol Integration
+
+### Key Protocol Details
+
+- `initialize` sends `capabilities.optOutNotificationMethods` to disable `item/commandExecution/outputDelta`
+- Output data comes from `item/completed` notifications (`commandExecution.aggregatedOutput`)
+- `turn/completed.turn.items` is empty per Codex v2 protocol spec — all item data arrives via `item/completed`
+- `initialized` is a notification (no id), not a request
+- WebSocket messages are already framed — append `\n` before feeding to `parseBuffer`
+
+### Approval & Sandbox
+
+- `approvalPolicy`: `untrusted | on-failure | on-request | granular | never`
+- `sandbox`: `read-only | workspace-write | danger-full-access`
+
 ## Configuration
 
 | Environment Variable | Default | Description |
 |---------------------|---------|-------------|
 | `CODEX_PATH` | `codex` | Path to Codex binary |
-| `CODEX_WS_PORT` | `4501` | WebSocket port for app-server |
+| `CODEX_WS_PORT` | *(auto)* | WebSocket port for app-server (auto-assigned if not set) |
 | `CODEX_MODEL` | *(default)* | Model override for Codex |
 | `CODEX_TRANSPORT` | `ws` | Transport mode: `ws` or `stdio` |
 
@@ -120,6 +158,13 @@ src/
 ```bash
 npm run build       # Compile TypeScript
 npm run dev         # Run with tsx (dev mode)
-npm test            # Run unit tests
+npm test            # Run unit tests (56 tests)
 npm run test:watch  # Watch mode
 ```
+
+## MCP Resources
+
+| URI | Description |
+|-----|-------------|
+| `bridge://session` | Current session info (JSON) |
+| `bridge://tasks` | Task list with statuses (JSON) |

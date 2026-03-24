@@ -14,7 +14,6 @@ import { logger } from "../utils/logger.js";
 import type {
   AgentMessageDeltaParams,
   ApprovalResponse,
-  CommandOutputDeltaParams,
   ItemCompletedParams,
   TurnCompletedParams,
   TurnStartedParams,
@@ -298,9 +297,7 @@ export class AgentBridge {
       case "item/agentMessage/delta":
         acc.appendAgentDelta(params as AgentMessageDeltaParams);
         break;
-      case "item/commandExecution/outputDelta":
-        acc.appendCommandOutput(params as CommandOutputDeltaParams);
-        break;
+      // item/commandExecution/outputDelta opted-out at protocol level
       case "item/completed":
         acc.addCompletedItem(params as ItemCompletedParams);
         break;
@@ -336,7 +333,7 @@ export class AgentBridge {
   private setupCodexHandlers(): void {
     const turnNotificationMethods = [
       "item/agentMessage/delta",
-      "item/commandExecution/outputDelta",
+      // item/commandExecution/outputDelta opted-out at protocol level
       "item/completed",
       "turn/completed",
     ];

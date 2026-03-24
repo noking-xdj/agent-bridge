@@ -76,6 +76,11 @@ export class CodexClient {
           version: "0.1.0",
         },
         protocolVersion: "2025-01-01",
+        capabilities: {
+          optOutNotificationMethods: [
+            "item/commandExecution/outputDelta",
+          ],
+        },
       },
       60_000,
     )) as InitializeResult;
