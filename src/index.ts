@@ -96,8 +96,9 @@ async function main() {
       : await findFreePort();
     wsUrl = `ws://127.0.0.1:${wsPort}`;
 
-    // Write initial state (threadId and codex pid will be updated on first use)
-    writeState(hash, { port: wsPort, cwd, pid: 0 });
+    // NOTE: state file is NOT written here — it is deferred until after
+    // warmup so that codex-bridge cannot discover (and connect to) the
+    // app-server before the session JSONL file exists.
 
     // Brief wait for port cleanup
     await new Promise((r) => setTimeout(r, 300));
@@ -122,20 +123,21 @@ async function main() {
 
   const bridge = new AgentBridge(config);
 
-  // Persist codex child PID as soon as it starts
+  // Track codex child PID and thread ID — state file is written once warmup
+  // completes (or on first tool call in stdio mode) so that codex-bridge
+  // cannot discover the app-server before the session JSONL exists.
   let codexChildPid = 0;
+  let stateFileWritten = false;
+
   bridge.onCodexStarted = (pid: number) => {
     codexChildPid = pid;
-    if (wsPort) {
-      writeState(hash, { port: wsPort, cwd, pid });
-      logger.info(`State updated with codex pid ${pid}`);
-    }
+    logger.info(`Codex started with pid ${pid}`);
   };
 
-  // Update state with thread ID when conversation starts
   bridge.onThreadCreated = (threadId: string) => {
-    if (wsPort) {
-      // Store the codex child PID (not the bridge PID) for stale cleanup
+    // In WS mode the state file is written after warmup; this callback
+    // handles subsequent thread creations (e.g. after a process restart).
+    if (wsPort && stateFileWritten) {
       writeState(hash, { port: wsPort, cwd, threadId, pid: codexChildPid });
       logger.info(`State updated with thread ${threadId}`);
     }
@@ -170,6 +172,33 @@ async function main() {
 
   await mcpServer.connect(mcpTransport);
   logger.info("AgentBridge MCP Server running on stdio");
+
+  // In WebSocket mode, eagerly warm up Codex so the session JSONL file
+  // exists before the TUI connects.  The Codex app-server only creates the
+  // JSONL on the first turn/start (not thread/start), so without this the
+  // TUI receives a session notification and fails to resume from a
+  // non-existent file.
+  //
+  // The state file is written AFTER warmup so that codex-bridge cannot
+  // discover the app-server until the JSONL is ready.
+  if (codexTransport === "ws" && wsPort) {
+    try {
+      await bridge.warmup({ cwd });
+    } catch (err) {
+      logger.warn("Warmup failed (non-fatal):", err);
+    }
+    // Now that the session JSONL exists, publish the state file so
+    // codex-bridge can discover and connect safely.
+    const session = bridge.sessionManager.getActiveSession();
+    writeState(hash, {
+      port: wsPort,
+      cwd,
+      threadId: session?.codexThreadId ?? undefined,
+      pid: codexChildPid,
+    });
+    stateFileWritten = true;
+    logger.info("State file published — codex-bridge can now connect");
+  }
 }
 
 main().catch((err) => {

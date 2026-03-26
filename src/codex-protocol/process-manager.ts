@@ -32,6 +32,9 @@ export class ProcessManager {
       args.push("--listen", "stdio://");
     }
 
+    // Use "mcp" session source so Codex TUI handles the session correctly
+    args.push("--session-source", "mcp");
+
     logger.info(
       `Starting Codex: ${this.options.binaryPath} ${args.join(" ")}`,
     );

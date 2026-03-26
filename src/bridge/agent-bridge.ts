@@ -241,6 +241,49 @@ export class AgentBridge {
     }
   }
 
+  /**
+   * Eagerly initialize Codex and create a thread + warm-up turn so that the
+   * session JSONL file exists BEFORE the Codex TUI connects.  The JSONL is
+   * only written when the first turn/start is processed by the app-server,
+   * not on thread/start.  Without this warm-up, the TUI receives a session
+   * notification, tries to resume from the JSONL, and fails because the file
+   * doesn't exist yet.
+   *
+   * Strategy: start a minimal turn to force JSONL creation, then immediately
+   * interrupt it so the TUI conversation stays clean.
+   */
+  async warmup(options?: { cwd?: string; model?: string }): Promise<void> {
+    const session = this.getOrCreateSession();
+    await this.ensureThread(session, options);
+
+    // Run a minimal turn to completion so the session JSONL has a complete
+    // turn record.  Interrupted turns leave the JSONL in an inconsistent
+    // state that the Codex TUI cannot resume from.
+    const accumulator = new TurnAccumulator();
+    const turnParams = buildTurnParams(
+      session.codexThreadId!,
+      "Reply with exactly: ok",
+    );
+    const turn = await this.codexClient.startTurn(turnParams);
+    this.activeAccumulators.set(turn.id, accumulator);
+    this.flushNotificationBuffer(turn.id, accumulator);
+
+    try {
+      await Promise.race([
+        accumulator.promise,
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error("Warmup timed out")), 30_000),
+        ),
+      ]);
+    } catch (err) {
+      logger.warn("Warmup turn error (non-fatal):", err);
+    } finally {
+      this.activeAccumulators.delete(turn.id);
+    }
+
+    logger.info("Warmup complete — session JSONL ready");
+  }
+
   async shutdown(): Promise<void> {
     logger.info("Shutting down AgentBridge");
     // Reject all active accumulators
